@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Suivi Intercontrat — 5 Degrés</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react">
+
+const SUPABASE_URL = "https://teonxryxddjsfetwxgik.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRlb254cnl4ZGRqc2ZldHd4Z2lrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1ODkzNDQsImV4cCI6MjA5NzE2NTM0NH0.NC5UJ0NZDiilgmSFhHSr1psdLRCwZL7NKloGGEF0SXc";
+const H = { "Content-Type":"application/json","apikey":SUPABASE_KEY,"Authorization":`Bearer ${SUPABASE_KEY}`,"Prefer":"return=representation" };
+
+const api = async (method, path, body) => {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method, headers: method==="DELETE"?{...H,"Prefer":"return=minimal"}:H,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`${method} ${path} → ${res.status}: ${await res.text()}`);
+  if (method==="DELETE"||res.status===204) return null;
+  const data = await res.json();
+  return Array.isArray(data) ? data[0]??null : data;
+};
+
+const BMS = ["Sébastien","Lucile","Arnaud","Paul","Louise"];
+const COLUMNS = [
+  {id:"todo",   label:"À faire",  border:"border-slate-300", hbg:"bg-slate-100", htxt:"text-slate-700"},
+  {id:"contacted",label:"Contacté",border:"border-blue-300",  hbg:"bg-blue-100",  htxt:"text-blue-700"},
+  {id:"followup", label:"Relancé", border:"border-orange-300",hbg:"bg-orange-100",htxt:"text-orange-700"},
+  {id:"done",     label:"Done ✓",  border:"border-green-300", hbg:"bg-green-100", htxt:"text-green-700"},
+];
+const COLLAB_COLORS = [
+  {bg:"bg-indigo-100",text:"text-indigo-700",border:"border-indigo-300",dot:"bg-indigo-500",ring:"ring-indigo-400"},
+  {bg:"bg-pink-100",  text:"text-pink-700",  border:"border-pink-300",  dot:"bg-pink-500",  ring:"ring-pink-400"},
+  {bg:"bg-emerald-100",text:"text-emerald-700",border:"border-emerald-300",dot:"bg-emerald-500",ring:"ring-emerald-400"},
+  {bg:"bg-orange-100",text:"text-orange-700",border:"border-orange-300",dot:"bg-orange-500",ring:"ring-orange-400"},
+  {bg:"bg-violet-100",text:"text-violet-700",border:"border-violet-300",dot:"bg-violet-500",ring:"ring-violet-400"},
+  {bg:"bg-cyan-100",  text:"text-cyan-700",  border:"border-cyan-300",  dot:"bg-cyan-500",  ring:"ring-cyan-400"},
+  {bg:"bg-rose-100",  text:"text-rose-700",  border:"border-rose-300",  dot:"bg-rose-500",  ring:"ring-rose-400"},
+];
+const PRIORITY = {high:{label:"Haute",color:"text-red-500"},medium:{label:"Moyenne",color:"text-orange-400"},low:{label:"Faible",color:"text-blue-400"}};
+const KANBAN_ORDER = ["todo","contacted","followup","done"];
+
+const uuid = () => crypto.randomUUID();
+const todayStr = () => new Date().toISOString().split("T")[0];
+const fmt = d => new Date(d+"T00:00:00").toLocaleDateString("fr-FR",{day:"numeric",month:"short"});
+const daysUntil = s => { const t=new Date(); t.setHours(0,0,0,0); return Math.ceil((new Date(s+"T00:00:00")-t)/86400000); };
+const fmtHeader = d => d.toLocaleDateString("fr-FR",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
+
+const Ico = ({d,size=16,cls=""}) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cls}>
+    {d.map((p,i)=><path key={i} d={p}/>)}
+  </svg>
+);
+const IPlus  = ({s=16,c=""}) => <Ico size={s} cls={c} d={["M12 5v14","M5 12h14"]} />;
+const IClose = ({s=16,c=""}) => <Ico size={s} cls={c} d={["M18 6 6 18","M6 6l12 12"]} />;
+const ISave  = ({s=16,c=""}) => <Ico size={s} cls={c} d={["M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z","M17 21v-8H7v8","M7 3v5h8"]} />;
+const IEdit  = ({s=16,c=""}) => <Ico size={s} cls={c} d={["M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"]} />;
+const ITrash = ({s=16,c=""}) => <Ico size={s} cls={c} d={["M3 6h18","M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6","M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"]} />;
+const IUser  = ({s=16,c=""}) => <Ico size={s} cls={c} d={["M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2","M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"]} />;
+const IUsers = ({s=16,c=""}) => <Ico size={s} cls={c} d={["M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2","M9 7a4 4 0 1 0 0 8 4 4 0 0 0 0-8z","M22 21v-2a4 4 0 0 0-3-3.87","M16 3.13a4 4 0 0 1 0 7.75"]} />;
+const IBag   = ({s=16,c=""}) => <Ico size={s} cls={c} d={["M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16","M2 9h20","M9 9v11","M15 9v11"]} />;
+const IChevR = ({s=16,c=""}) => <Ico size={s} cls={c} d={["m9 18 6-6-6-6"]} />;
+const IChevL = ({s=16,c=""}) => <Ico size={s} cls={c} d={["m15 18-6-6 6-6"]} />;
+const ILoader= ({s=16,c=""}) => <Ico size={s} cls={`${c} spin`} d={["M21 12a9 9 0 1 1-6.219-8.56"]} />;
+
+const Btn = ({children,onClick,variant="primary",size="md",disabled=false,className=""}) => {
+  const base = "inline-flex items-center justify-center rounded-lg font-medium transition-colors focus:outline-none";
+  const sizes = {sm:"px-2.5 py-1.5 text-xs",md:"px-4 py-2 text-sm"};
+  const variants = {
+    primary:"bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50",
+    secondary:"bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50",
+    outline:"bg-transparent text-gray-700 border border-gray-300 hover:bg-gray-50",
+    destructive:"bg-red-600 text-white hover:bg-red-700",
+  };
+  return (
+    <button onClick={onClick} disabled={disabled}
+      className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}>
+      {children}
+    </button>
+  );
+};
+
+function App() {
+  const [collabs, setCollabs] = React.useState([]);
+  const [cards,   setCards]   = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [saving,  setSaving]  = React.useState(false);
+  const [error,   setError]   = React.useState(null);
+  const [selCollab, setSelCollab] = React.useState("all");
+  const [selBM,     setSelBM]     = React.useState("all");
+  const [dragId,    setDragId]    = React.useState(null);
+  const [dragOver,  setDragOver]  = React.useState(null);
+  const [showCollab, setShowCollab] = React.useState(false);
+  const [showCard,   setShowCard]   = React.useState(false);
+  const [editCard,   setEditCard]   = React.useState(null);
+  const [editCollab, setEditCollab] = React.useState(null);
+  const emptyC = {name:"",role:"",available_from:todayStr(),bm:BMS[0]};
+  const emptyK = {company:"",contact:"",bm:BMS[0],collaborator_ids:[],status:"todo",note:"",priority:"medium"};
+  const [cf, setCf] = React.useState(emptyC);
+  const [kf, setKf] = React.useState(emptyK);
+
+  const load = React.useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const [cr, tr] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/collaborators?select=*&order=available_from.asc`,{headers:H}).then(r=>r.json()),
+        fetch(`${SUPABASE_URL}/rest/v1/tickets?select=*,ticket_collaborators(collaborator_id)&order=created_at.asc`,{headers:H}).then(r=>r.json()),
+      ]);
+      setCollabs(cr);
+      setCards(tr.map(t=>({...t,collaborator_ids:(t.ticket_collaborators??[]).map(tc=>tc.collaborator_id)})));
+    } catch(e){ setError("Impossible de charger : "+e.message); }
+    finally { setLoading(false); }
+  },[]);
+
+  React.useEffect(()=>{ load(); },[load]);
+
+  const color = id => { const i=collabs.findIndex(c=>c.id===id); return COLLAB_COLORS[Math.max(i,0)%COLLAB_COLORS.length]; };
+  const filtered = cards.filter(c=>selCollab==="all"||c.collaborator_ids.includes(selCollab)).filter(c=>selBM==="all"||c.bm===selBM);
+  const colCards = s => filtered.filter(c=>c.status===s);
+
+  const onDrop = async (e,col) => {
+    e.preventDefault(); if (!dragId) return;
+    const today=todayStr();
+    setCards(p=>p.map(c=>c.id===dragId?{...c,status:col,updated_at:today}:c));
+    setDragId(null); setDragOver(null);
+    try { await api("PATCH",`tickets?id=eq.${dragId}`,{status:col,updated_at:today}); }
+    catch(e){ setError(e.message); }
+  };
+  const moveCard = async (id,dir) => {
+    const card=cards.find(c=>c.id===id); if(!card) return;
+    const i=KANBAN_ORDER.indexOf(card.status);
+    const ns=KANBAN_ORDER[dir==="right"?Math.min(i+1,3):Math.max(i-1,0)];
+    const today=todayStr();
+    setCards(p=>p.map(c=>c.id===id?{...c,status:ns,updated_at:today}:c));
+    try { await api("PATCH",`tickets?id=eq.${id}`,{status:ns,updated_at:today}); }
+    catch(e){ setError(e.message); }
+  };
+  const syncCollabs = async (tid,cids) => {
+    await fetch(`${SUPABASE_URL}/rest/v1/ticket_collaborators?ticket_id=eq.${tid}`,{method:"DELETE",headers:{...H,"Prefer":"return=minimal"}});
+    if(cids.length>0) await fetch(`${SUPABASE_URL}/rest/v1/ticket_collaborators`,{method:"POST",headers:H,body:JSON.stringify(cids.map(cid=>({ticket_id:tid,collaborator_id:cid})))});
+  };
+  const saveCollab = async () => {
+    if(!cf.name?.trim()) return; setSaving(true);
+    try {
+      if(editCollab){ const {id,...patch}=cf; await api("PATCH",`collaborators?id=eq.${editCollab.id}`,patch); setCollabs(p=>p.map(c=>c.id===editCollab.id?{...c,...cf}:c)); }
+      else { const row={id:uuid(),name:cf.name,role:cf.role||"",available_from:cf.available_from||todayStr(),bm:cf.bm||BMS[0]}; await api("POST","collaborators",row); setCollabs(p=>[...p,row].sort((a,b)=>new Date(a.available_from)-new Date(b.available_from))); }
+      setShowCollab(false); setEditCollab(null); setCf(emptyC);
+    } catch(e){ setError(e.message); } finally{ setSaving(false); }
+  };
+  const delCollab = async id => {
+    setSaving(true);
+    try { await api("DELETE",`collaborators?id=eq.${id}`); setCollabs(p=>p.filter(c=>c.id!==id)); setShowCollab(false); setEditCollab(null); }
+    catch(e){ setError(e.message); } finally{ setSaving(false); }
+  };
+  const saveCard = async () => {
+    if(!kf.company?.trim()) return; setSaving(true);
+    try {
+      const {collaborator_ids=[], ...rest}=kf;
+      if(editCard){ const patch={...rest,updated_at:todayStr()}; await api("PATCH",`tickets?id=eq.${editCard.id}`,patch); await syncCollabs(editCard.id,collaborator_ids); setCards(p=>p.map(c=>c.id===editCard.id?{...c,...patch,collaborator_ids}:c)); }
+      else { const nid=uuid(); const row={id:nid,company:rest.company,contact:rest.contact||"",bm:rest.bm||BMS[0],status:rest.status||"todo",note:rest.note||"",priority:rest.priority||"medium",created_at:todayStr(),updated_at:todayStr()}; await api("POST","tickets",row); await syncCollabs(nid,collaborator_ids); setCards(p=>[...p,{...row,collaborator_ids}]); }
+      setShowCard(false); setEditCard(null); setKf(emptyK);
+    } catch(e){ setError(e.message); } finally{ setSaving(false); }
+  };
+  const delCard = async id => {
+    setSaving(true);
+    try { await syncCollabs(id,[]); await api("DELETE",`tickets?id=eq.${id}`); setCards(p=>p.filter(c=>c.id!==id)); setShowCard(false); setEditCard(null); }
+    catch(e){ setError(e.message); } finally{ setSaving(false); }
+  };
+
+  const inp = "w-full rounded-lg border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400";
+  const lbl = "block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1";
+  const sortedCollabs = [...collabs].sort((a,b)=>new Date(a.available_from)-new Date(b.available_from));
+
+  if(loading) return (<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="flex flex-col items-center gap-3 text-gray-400"><ILoader s={32} /><p className="text-sm font-medium">Chargement…</p></div></div>);
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-indigo-700 px-4 py-4">
+        <div className="mx-auto max-w-6xl flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-xl font-bold text-white flex items-center gap-2"><IBag s={20} /> Suivi Intercontrat — 5 Degrés</h1>
+            <p className="text-indigo-200 text-sm capitalize mt-0.5">{fmtHeader(new Date())}</p>
+          </div>
+          <div className="flex gap-2 items-center flex-wrap">
+            {saving && <ILoader s={16} c="text-indigo-200" />}
+            <Btn variant="secondary" size="sm" onClick={()=>{setCf(emptyC);setEditCollab(null);setShowCollab(true);}}><IPlus s={14} /><span className="ml-1">Collaborateur</span></Btn>
+            <Btn variant="secondary" size="sm" onClick={()=>{setKf(emptyK);setEditCard(null);setShowCard(true);}}><IPlus s={14} /><span className="ml-1">Ticket</span></Btn>
+          </div>
+        </div>
+      </div>
+      {error && (<div className="mx-auto max-w-6xl px-4 pt-3"><div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 flex items-center justify-between"><p className="text-red-700 text-sm">{error}</p><button onClick={()=>setError(null)} className="text-red-400 hover:text-red-600"><IClose s={14}/></button></div></div>)}
+      <div className="mx-auto max-w-6xl px-4 py-5 space-y-5">
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1.5"><IUsers s={14}/> Collaborateurs bientôt disponibles</p>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={()=>setSelCollab("all")} className={`px-3 py-2 rounded-xl border text-sm font-medium transition-all ${selCollab==="all"?"bg-indigo-600 text-white border-indigo-600":"bg-white border-gray-200 text-gray-500 hover:border-indigo-300"}`}>Tous ({cards.length})</button>
+            {sortedCollabs.map(col=>{
+              const cc=color(col.id); const days=daysUntil(col.available_from); const isSel=selCollab===col.id;
+              const cnt=cards.filter(c=>c.collaborator_ids.includes(col.id)).length;
+              const urgencyTxt=days<=0?"Dispo !":days<=14?`J-${days}`:fmt(col.available_from);
+              const urgencyCol=days<=0?"text-red-600 font-bold":days<=7?"text-red-500 font-semibold":days<=14?"text-orange-500 font-semibold":"text-gray-400";
+              return (<div key={col.id} className="relative group"><button onClick={()=>setSelCollab(isSel?"all":col.id)} className={`flex items-center gap-2 pl-3 pr-2 py-2 rounded-xl border font-medium transition-all ${isSel?`${cc.bg} ${cc.text} ${cc.border} ring-2 ${cc.ring}`:"bg-white border-gray-200 hover:border-indigo-200"}`}><span className={`w-2 h-2 rounded-full shrink-0 ${cc.dot}`}/><div className="text-left"><p className={`text-sm leading-tight ${isSel?cc.text:"text-gray-800"}`}>{col.name}</p><p className={`text-xs leading-tight ${isSel?cc.text+" opacity-80":"text-gray-400"}`}>{col.role}</p></div><div className="flex flex-col items-end ml-1"><span className={`text-xs leading-tight ${isSel?cc.text:urgencyCol}`}>{urgencyTxt}</span><span className={`text-xs leading-tight ${isSel?cc.text+" opacity-70":"text-gray-400"}`}>{cnt} ticket{cnt!==1?"s":""}</span></div></button><button onClick={()=>{setCf(col);setEditCollab(col);setShowCollab(true);}} className="absolute -top-1.5 -right-1.5 flex w-5 h-5 bg-indigo-600 text-white rounded-full items-center justify-center shadow-md opacity-0 group-hover:opacity-100 transition-opacity"><IEdit s={10}/></button></div>);
+            })}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">BM :</span>
+          <button onClick={()=>setSelBM("all")} className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${selBM==="all"?"bg-indigo-600 text-white border-indigo-600":"bg-white border-gray-200 text-gray-500 hover:border-indigo-300"}`}>Tous</button>
+          {BMS.map(bm=>{ const cnt=cards.filter(c=>c.bm===bm&&(selCollab==="all"||c.collaborator_ids.includes(selCollab))).length; return (<button key={bm} onClick={()=>setSelBM(selBM===bm?"all":bm)} className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${selBM===bm?"bg-indigo-600 text-white border-indigo-600":"bg-white border-gray-200 text-gray-500 hover:border-indigo-300"}`}>{bm} ({cnt})</button>); })}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:"10px"}}>
+          {COLUMNS.map(col=>{ const cc=colCards(col.id); const isOver=dragOver===col.id; return (
+            <div key={col.id} onDragOver={e=>{e.preventDefault();setDragOver(col.id);}} onDrop={e=>onDrop(e,col.id)} onDragLeave={()=>setDragOver(null)} className={`rounded-xl border-2 flex flex-col transition-colors ${isOver?"border-indigo-400 bg-indigo-50":col.border+" bg-gray-50"}`} style={{minHeight:"420px"}}>
+              <div className={`px-3 py-2.5 rounded-t-xl flex items-center justify-between ${col.hbg}`}><span className={`font-bold text-sm ${col.htxt}`}>{col.label}</span><span className={`text-xs font-bold px-2 py-0.5 rounded-full bg-white/70 ${col.htxt}`}>{cc.length}</span></div>
+              <div className="p-2 space-y-2 flex-1">
+                {cc.map(card=>{ const isDrag=dragId===card.id; const ci=KANBAN_ORDER.indexOf(card.status); return (
+                  <div key={card.id} draggable onDragStart={e=>{setDragId(card.id);e.dataTransfer.effectAllowed="move";}} onDragEnd={()=>{setDragId(null);setDragOver(null);}} className={`bg-white rounded-xl border shadow-sm p-3 space-y-2 cursor-grab active:cursor-grabbing transition-all ${isDrag?"opacity-30 scale-95":"hover:shadow-md hover:-translate-y-0.5"}`}>
+                    <div className="flex items-start justify-between gap-1"><span className="font-semibold text-sm text-gray-800 leading-tight">{card.company}</span><div className="flex items-center gap-0.5 shrink-0">{ci>0&&<button onClick={()=>moveCard(card.id,"left")} className="p-0.5 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"><IChevL s={14}/></button>}{ci<3&&<button onClick={()=>moveCard(card.id,"right")} className="p-0.5 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"><IChevR s={14}/></button>}<button onClick={()=>{setKf(card);setEditCard(card);setShowCard(true);}} className="p-0.5 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"><IEdit s={12}/></button><button onClick={()=>delCard(card.id)} className="p-0.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"><IClose s={12}/></button></div></div>
+                    {card.contact&&<p className="text-xs text-gray-400">{card.contact}</p>}
+                    {card.note&&<p className="text-xs text-gray-500 italic leading-snug border-l-2 border-indigo-200 pl-2">{card.note}</p>}
+                    <div className="space-y-1.5 pt-0.5"><div className="flex flex-wrap gap-1">{card.collaborator_ids.length>0?card.collaborator_ids.map(cid=>{ const co=collabs.find(c=>c.id===cid); if(!co) return null; const ccc=color(co.id); return <span key={cid} className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full border font-medium ${ccc.bg} ${ccc.text} ${ccc.border}`}><IUser s={10}/>{co.name.split(" ")[0]}</span>; }):<span className="text-xs text-gray-400 italic">Non assigné</span>}</div><div className="flex items-center gap-1.5"><span className={`text-xs font-semibold ${PRIORITY[card.priority].color}`}>● {PRIORITY[card.priority].label}</span><span className="text-xs text-gray-400">{card.bm}</span></div></div>
+                  </div>
+                );})
+                }{isOver&&<div className="border-2 border-dashed border-indigo-400 rounded-xl p-5 text-center text-xs text-indigo-500 font-semibold bg-indigo-50">Déposer ici</div>}{cc.length===0&&!isOver&&<div className="flex items-center justify-center py-8 text-xs text-gray-400 opacity-60">Aucun ticket</div>}
+              </div>
+            </div>
+          ); })}
+        </div>
+      </div>
+      {showCollab&&(<div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"><div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4"><div className="flex items-center justify-between"><h3 className="font-bold text-lg flex items-center gap-2"><IUser s={18} c="text-indigo-600"/>{editCollab?"Modifier":"Nouveau collaborateur"}</h3><button onClick={()=>{setShowCollab(false);setEditCollab(null);}} className="text-gray-400 hover:text-gray-600"><IClose s={18}/></button></div><div className="space-y-3"><div><label className={lbl}>Nom complet *</label><input className={inp} placeholder="Prénom Nom" value={cf.name||""} onChange={e=>setCf(p=>({...p,name:e.target.value}))}/></div><div><label className={lbl}>Rôle / Compétences</label><input className={inp} placeholder="ex: Développeur React…" value={cf.role||""} onChange={e=>setCf(p=>({...p,role:e.target.value}))}/></div><div><label className={lbl}>Date de disponibilité</label><input type="date" className={inp} value={cf.available_from||todayStr()} onChange={e=>setCf(p=>({...p,available_from:e.target.value}))}/></div><div><label className={lbl}>BM responsable</label><select className={inp} value={cf.bm||BMS[0]} onChange={e=>setCf(p=>({...p,bm:e.target.value}))}>{BMS.map(b=><option key={b} value={b}>{b}</option>)}</select></div></div><div className="flex gap-2 pt-1"><Btn className="flex-1" onClick={saveCollab} disabled={saving}>{saving?<ILoader s={14}/>:<ISave s={14}/>}<span className="ml-1">Enregistrer</span></Btn>{editCollab&&<Btn variant="destructive" size="sm" onClick={()=>delCollab(editCollab.id)} disabled={saving}><ITrash s={14}/></Btn>}<Btn variant="outline" onClick={()=>{setShowCollab(false);setEditCollab(null);}}>Annuler</Btn></div></div></div>)}
+      {showCard&&(<div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"><div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 max-h-screen overflow-y-auto"><div className="flex items-center justify-between"><h3 className="font-bold text-lg flex items-center gap-2"><IBag s={18} c="text-indigo-600"/>{editCard?"Modifier le ticket":"Nouveau ticket"}</h3><button onClick={()=>{setShowCard(false);setEditCard(null);}} className="text-gray-400 hover:text-gray-600"><IClose s={18}/></button></div><div className="space-y-3"><div><label className={lbl}>Entreprise *</label><input className={inp} placeholder="Nom de l'entreprise" value={kf.company||""} onChange={e=>setKf(p=>({...p,company:e.target.value}))}/></div><div><label className={lbl}>Contact</label><input className={inp} placeholder="Nom du contact" value={kf.contact||""} onChange={e=>setKf(p=>({...p,contact:e.target.value}))}/></div><div><label className={lbl}>Collaborateurs concernés</label><div className="mt-1 rounded-lg border border-gray-200 overflow-hidden divide-y divide-gray-100">{collabs.length===0?<p className="px-3 py-2 text-xs text-gray-400 italic">Aucun collaborateur — ajoutez-en d'abord</p>:collabs.map(c=>{ const ids=kf.collaborator_ids||[]; const checked=ids.includes(c.id); const cc=color(c.id); return (<label key={c.id} className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors ${checked?cc.bg:"hover:bg-gray-50"}`}><input type="checkbox" checked={checked} onChange={()=>setKf(p=>({...p,collaborator_ids:checked?ids.filter(id=>id!==c.id):[...ids,c.id]}))} className="rounded"/><span className={`w-2 h-2 rounded-full shrink-0 ${cc.dot}`}/><div className="flex-1 min-w-0"><p className={`text-sm font-medium leading-tight ${checked?cc.text:"text-gray-800"}`}>{c.name}</p><p className="text-xs text-gray-400 leading-tight">{c.role}</p></div>{checked&&<span className={`text-xs font-semibold ${cc.text}`}>✓</span>}</label>); })}</div></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}><div><label className={lbl}>BM</label><select className={inp} value={kf.bm||BMS[0]} onChange={e=>setKf(p=>({...p,bm:e.target.value}))}>{BMS.map(b=><option key={b} value={b}>{b}</option>)}</select></div><div><label className={lbl}>Priorité</label><select className={inp} value={kf.priority||"medium"} onChange={e=>setKf(p=>({...p,priority:e.target.value}))}><option value="high">Haute</option><option value="medium">Moyenne</option><option value="low">Faible</option></select></div></div><div><label className={lbl}>Colonne</label><select className={inp} value={kf.status||"todo"} onChange={e=>setKf(p=>({...p,status:e.target.value}))}>{COLUMNS.map(col=><option key={col.id} value={col.id}>{col.label}</option>)}</select></div><div><label className={lbl}>Note</label><textarea className={inp} rows={2} placeholder="Contexte, remarques…" value={kf.note||""} onChange={e=>setKf(p=>({...p,note:e.target.value}))}/></div></div><div className="flex gap-2 pt-1"><Btn className="flex-1" onClick={saveCard} disabled={saving}>{saving?<ILoader s={14}/>:<ISave s={14}/>}<span className="ml-1">Enregistrer</span></Btn>{editCard&&<Btn variant="destructive" size="sm" onClick={()=>delCard(editCard.id)} disabled={saving}><ITrash s={14}/></Btn>}<Btn variant="outline" onClick={()=>{setShowCard(false);setEditCard(null);}}>Annuler</Btn></div></div></div>)}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
